@@ -1,0 +1,160 @@
+// Prisma schema for student absence management system (FR/AR)
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+// =====================
+// Users & Auth
+// =====================
+
+model User {
+  id        String   @id @default(cuid())
+  email     String   @unique
+  name      String
+  password  String
+  role      String   @default("ENSEIGNANT") // SURVEILLANT | ENSEIGNANT
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  teacher   Teacher?
+}
+
+// =====================
+// School structure
+// =====================
+
+model Niveau {
+  id        String   @id @default(cuid())
+  code      String   @unique // e.g. "TC", "1BAC", "2BAC"
+  labelFr   String
+  labelAr   String
+  order     Int      @default(0)
+  classes   Classe[]
+}
+
+model Classe {
+  id        String   @id @default(cuid())
+  code      String   @unique // e.g. "TCSF-1"
+  labelFr   String
+  labelAr   String
+  niveauId  String
+  niveau    Niveau   @relation(fields: [niveauId], references: [id], onDelete: Cascade)
+  capacity  Int      @default(40)
+  createdAt DateTime @default(now())
+
+  students   Student[]
+  groups     Groupe[]
+  services   ServiceTable[]
+  sessions   Session[]
+}
+
+model Groupe {
+  id        String   @id @default(cuid())
+  code      String   // e.g. "G1"
+  labelFr   String
+  labelAr   String
+  classeId  String
+  classe    Classe   @relation(fields: [classeId], references: [id], onDelete: Cascade)
+  students  Student[]
+  services  ServiceTable[]
+
+  @@unique([code, classeId])
+}
+
+// =====================
+// Students
+// =====================
+
+model Student {
+  id         String   @id @default(cuid())
+  codeMassar String   @unique
+  firstName  String
+  lastName   String
+  classeId   String
+  classe     Classe   @relation(fields: [classeId], references: [id], onDelete: Cascade)
+  groupId    String?
+  groupe     Groupe?  @relation(fields: [groupId], references: [id], onDelete: SetNull)
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  absences   Absence[]
+}
+
+// =====================
+// Teachers & Service Tables
+// =====================
+
+model Teacher {
+  id        String   @id @default(cuid())
+  userId    String   @unique
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  firstName String
+  lastName  String
+  matiere   String   // subject taught (e.g. "Mathématiques")
+  matiereAr String?
+  createdAt DateTime @default(now())
+
+  services  ServiceTable[]
+  sessions  Session[]
+}
+
+// "Table de service" — a single assignment: Teacher X teaches Classe Y (optionally Groupe Z) for subject W
+model ServiceTable {
+  id         String   @id @default(cuid())
+  teacherId  String
+  teacher    Teacher  @relation(fields: [teacherId], references: [id], onDelete: Cascade)
+  classeId   String
+  classe     Classe   @relation(fields: [classeId], references: [id], onDelete: Cascade)
+  groupId    String?
+  groupe     Groupe?  @relation(fields: [groupId], references: [id], onDelete: SetNull)
+  subject    String
+  subjectAr  String?
+  hoursPerWeek Int   @default(2)
+  createdAt  DateTime @default(now())
+
+  sessions   Session[]
+
+  @@unique([teacherId, classeId, groupId, subject])
+}
+
+// =====================
+// Sessions & Absences
+// =====================
+
+model Session {
+  id          String   @id @default(cuid())
+  teacherId   String
+  teacher     Teacher  @relation(fields: [teacherId], references: [id], onDelete: Cascade)
+  classeId    String
+  classe      Classe   @relation(fields: [classeId], references: [id], onDelete: Cascade)
+  serviceId   String?
+  service     ServiceTable? @relation(fields: [serviceId], references: [id], onDelete: SetNull)
+  date        DateTime
+  subject     String
+  subjectAr   String?
+  createdAt   DateTime @default(now())
+
+  absences    Absence[]
+}
+
+model Absence {
+  id         String   @id @default(cuid())
+  studentId  String
+  student    Student  @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  sessionId  String
+  session    Session  @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  status     String   @default("ABSENT") // ABSENT | RETARD | PRESENT (rare to record present)
+  justified  Boolean  @default(false)
+  oriented   Boolean  @default(false) // sent to surveillant for justification
+  reason     String?
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  @@unique([studentId, sessionId])
+}

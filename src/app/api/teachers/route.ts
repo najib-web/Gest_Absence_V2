@@ -1,0 +1,59 @@
+import { NextRequest, NextResponse } from "next/server";
+import { db } from "@/lib/db";
+import { getCurrentUser } from "@/lib/auth";
+
+export async function GET(req: Request) {
+  const user = await getCurrentUser(req);
+  if (!user) return NextResponse.json({ error: "Non authentifié" }, { status: 401 });
+
+  const teachers = await db.teacher.findMany({
+    orderBy: [{ lastName: "asc" }, { firstName: "asc" }],
+    include: {
+      user: { select: { email: true, name: true } },
+      services: { include: { classe: true, groupe: true } },
+      _count: { select: { sessions: true } },
+    },
+  });
+  return NextResponse.json({ teachers });
+}
+
+export async function POST(req: NextRequest) {
+  const user = await getCurrentUser(req);
+  if (!user || user.role !== "SURVEILLANT") {
+    return NextResponse.json({ error: "Accès refusé" }, { status: 403 });
+  }
+  try {
+    const body = await req.json();
+    const { firstName, lastName, matiere, matiereAr, email, password } = body;
+    if (!firstName || !lastName || !matiere || !email || !password) {
+      return NextResponse.json({ error: "Champs manquants" }, { status: 400 });
+    }
+    // Create user account + teacher profile
+    const existing = await db.user.findUnique({ where: { email: email.toLowerCase().trim() } });
+    if (existing) {
+      return NextResponse.json({ error: "Email déjà utilisé" }, { status: 409 });
+    }
+    const newUser = await db.user.create({
+      data: {
+        email: email.toLowerCase().trim(),
+        name: `${firstName} ${lastName}`,
+        password,
+        role: "ENSEIGNANT",
+      },
+    });
+    const teacher = await db.teacher.create({
+      data: {
+        userId: newUser.id,
+        firstName,
+        lastName,
+        matiere,
+        matiereAr: matiereAr || null,
+      },
+      include: { user: { select: { email: true, name: true } } },
+    });
+    return NextResponse.json({ teacher });
+  } catch (e) {
+    console.error(e);
+    return NextResponse.json({ error: "Erreur serveur" }, { status: 500 });
+  }
+}

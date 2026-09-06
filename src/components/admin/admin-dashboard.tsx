@@ -10,6 +10,8 @@ import {
   BookOpen,
   ShieldAlert,
   CalendarDays,
+  UserCheck,
+  History,
 } from "lucide-react";
 import { AdminOverview } from "@/components/admin/admin-overview";
 import { AdminStudents } from "@/components/admin/admin-students";
@@ -17,6 +19,8 @@ import { AdminClasses } from "@/components/admin/admin-classes";
 import { AdminTeachers } from "@/components/admin/admin-teachers";
 import { AdminSchedule } from "@/components/admin/admin-schedule";
 import { AdminSupervision } from "@/components/admin/admin-supervision";
+import { AdminOrientations } from "@/components/admin/admin-orientations";
+import { AbsenceHistory } from "@/components/absence-history";
 
 export function AdminDashboard({ user, onLogout }: { user: SessionUser; onLogout: () => void }) {
   const { t } = useI18n();
@@ -29,6 +33,8 @@ export function AdminDashboard({ user, onLogout }: { user: SessionUser; onLogout
     { id: "teachers", label: `${t.teachers} & ${t.serviceTables}`, icon: <BookOpen className="h-4 w-4" /> },
     { id: "schedule", label: t.weeklySchedule, icon: <CalendarDays className="h-4 w-4" /> },
     { id: "supervision", label: t.supervision, icon: <ShieldAlert className="h-4 w-4" /> },
+    { id: "orientations", label: t.orientations, icon: <UserCheck className="h-4 w-4" /> },
+    { id: "historique", label: t.absenceHistory, icon: <History className="h-4 w-4" /> },
   ];
 
   return (
@@ -39,6 +45,8 @@ export function AdminDashboard({ user, onLogout }: { user: SessionUser; onLogout
       {active === "teachers" && <AdminTeachers />}
       {active === "schedule" && <AdminSchedule />}
       {active === "supervision" && <AdminSupervision />}
+      {active === "orientations" && <AdminOrientations />}
+      {active === "historique" && <AbsenceHistory />}
     </AppShell>
   );
 }

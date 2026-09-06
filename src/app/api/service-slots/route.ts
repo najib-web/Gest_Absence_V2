@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/db";
 import { getCurrentUser } from "@/lib/auth";
-import { TIME_SLOTS } from "@/lib/schedule";
+import { isValidTimeSlot } from "@/lib/schedule";
 
 // GET /api/service-slots — weekly schedule grid entries
 export async function GET(req: Request) {
@@ -45,13 +45,15 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "Champs manquants" }, { status: 400 });
     }
 
-    // Validations: day 1..6 (Lundi..Samedi), hours within 8h-18h
+    // Validations: day 1..6 (Lundi..Samedi), hours within 8h-18h, durée 1h ou 2h
     if (dow < 1 || dow > 6) {
       return NextResponse.json({ error: "Jour invalide (Lundi à Samedi)" }, { status: 400 });
     }
-    const isValidSlot = TIME_SLOTS.some((s) => s.startMin === start && s.endMin === end);
-    if (!isValidSlot) {
-      return NextResponse.json({ error: "Créneau horaire invalide (8h à 18h)" }, { status: 400 });
+    if (!isValidTimeSlot(start, end)) {
+      return NextResponse.json(
+        { error: "Créneau invalide : durée de 1h ou 2h, entre 08:00 et 18:00" },
+        { status: 400 }
+      );
     }
 
     // Conflict 1: teacher already booked on an overlapping slot that day

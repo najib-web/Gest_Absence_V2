@@ -16,6 +16,50 @@ export const TIME_SLOTS: TimeSlotDef[] = [
   { id: 5, startMin: 16 * 60, endMin: 18 * 60 }, // 16:00 - 18:00
 ];
 
+// Plage scolaire et durées de séance autorisées (1h ou 2h)
+export const SCHOOL_START_MIN = 8 * 60; // 08:00
+export const SCHOOL_END_MIN = 18 * 60;  // 18:00
+export const SLOT_DURATIONS_H = [1, 2]; // durées possibles en heures
+
+// 10 lignes horaires de 08:00 à 18:00 (base de la grille)
+export const HOUR_SLOTS: TimeSlotDef[] = Array.from({ length: 10 }, (_, i) => ({
+  id: i + 1,
+  startMin: SCHOOL_START_MIN + i * 60,
+  endMin: SCHOOL_START_MIN + (i + 1) * 60,
+}));
+
+/**
+ * Vérifie qu'un créneau est valide :
+ * aligné sur l'heure, durée de 1h ou 2h, à l'intérieur de 08:00 → 18:00.
+ */
+export function isValidTimeSlot(startMin: number, endMin: number): boolean {
+  if (!Number.isInteger(startMin) || !Number.isInteger(endMin)) return false;
+  if (startMin < SCHOOL_START_MIN || endMin > SCHOOL_END_MIN) return false;
+  const dur = endMin - startMin;
+  if (dur <= 0) return false;
+  if (!SLOT_DURATIONS_H.includes(dur / 60)) return false;
+  return startMin % 60 === 0;
+}
+
+/** Durée d'un créneau en heures (ex: 1 ou 2) */
+export function slotDurationHours(startMin: number, endMin: number): number {
+  return (endMin - startMin) / 60;
+}
+
+/** Toutes les combinaisons valides (début × durée) pour l'aide à la saisie */
+export function buildSlotOptions(): { startMin: number; endMin: number; hours: number }[] {
+  const out: { startMin: number; endMin: number; hours: number }[] = [];
+  for (let h = SCHOOL_START_MIN / 60; h < SCHOOL_END_MIN / 60; h++) {
+    for (const dur of SLOT_DURATIONS_H) {
+      const end = (h + dur) * 60;
+      if (end <= SCHOOL_END_MIN) {
+        out.push({ startMin: h * 60, endMin: end, hours: dur });
+      }
+    }
+  }
+  return out;
+}
+
 export const DAY_NAMES: { dow: number; fr: string; ar: string; frShort: string; arShort: string }[] = [
   { dow: 1, fr: "Lundi", ar: "الاثنين", frShort: "Lun", arShort: "الإثنين" },
   { dow: 2, fr: "Mardi", ar: "الثلاثاء", frShort: "Mar", arShort: "الثلاثاء" },

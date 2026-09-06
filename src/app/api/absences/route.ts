@@ -13,6 +13,7 @@ export async function GET(req: Request) {
   const unjustifiedOnly = url.searchParams.get("unjustified") === "true";
   const classeId = url.searchParams.get("classeId");
   const studentId = url.searchParams.get("studentId");
+  const codeMassar = url.searchParams.get("codeMassar");
   const teacherId = url.searchParams.get("teacherId");
   const from = url.searchParams.get("from");
   const to = url.searchParams.get("to");
@@ -23,6 +24,7 @@ export async function GET(req: Request) {
       ...(justifiedOnly ? { justified: true } : {}),
       ...(unjustifiedOnly ? { justified: false } : {}),
       ...(studentId ? { studentId } : {}),
+      ...(codeMassar ? { student: { codeMassar: codeMassar.trim().toUpperCase() } } : {}),
       ...(classeId || teacherId || from || to
         ? {
             session: {
@@ -32,7 +34,7 @@ export async function GET(req: Request) {
                 ? {
                     date: {
                       ...(from ? { gte: new Date(from) } : {}),
-                      ...(to ? { lte: new Date(to) } : {}),
+                      ...(to ? { lte: new Date(to + "T23:59:59.999")} : {}),
                     },
                   }
                 : {}),
@@ -45,7 +47,7 @@ export async function GET(req: Request) {
       student: { include: { classe: true, groupe: true } },
       session: { include: { teacher: true, classe: true } },
     },
-    take: 500,
+    take: 1000,
   });
 
   return NextResponse.json({ absences });

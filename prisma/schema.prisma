@@ -86,7 +86,8 @@ model Student {
   createdAt  DateTime @default(now())
   updatedAt  DateTime @updatedAt
 
-  absences   Absence[]
+  absences     Absence[]
+  orientations Orientation[]
 }
 
 // =====================
@@ -103,9 +104,10 @@ model Teacher {
   matiereAr String?
   createdAt DateTime @default(now())
 
-  services  ServiceTable[]
-  sessions  Session[]
-  slots     ServiceSlot[]
+  services     ServiceTable[]
+  sessions     Session[]
+  slots        ServiceSlot[]
+  orientations Orientation[]
 }
 
 // "Table de service" — a single assignment: Teacher X teaches Classe Y (optionally Groupe Z) for subject W
@@ -168,6 +170,7 @@ model Session {
   createdAt   DateTime @default(now())
 
   absences    Absence[]
+  orientations Orientation[]
 }
 
 model Absence {
@@ -184,4 +187,44 @@ model Absence {
   updatedAt  DateTime @updatedAt
 
   @@unique([studentId, sessionId])
+}
+
+// =====================
+// Settings (thresholds etc.)
+// =====================
+
+model Setting {
+  id        String   @id @default(cuid())
+  key       String   @unique // e.g. "absenceThreshold"
+  value     String   // stored as string, parsed by the API layer
+  updatedAt DateTime @updatedAt
+}
+
+// =====================
+// Orientations & Reports
+// =====================
+// source: "TEACHER"  → rapport rédigé par un enseignant et envoyé au surveillant
+//         "SEUIL"    → orientation décidée par le surveillant (seuil d'absences dépassé)
+//         "MANUEL"   → orientation décidée par le surveillant sans seuil
+// status: "PENDING" (en attente de traitement) | "RESOLVED" (traité)
+model Orientation {
+  id          String    @id @default(cuid())
+  studentId   String
+  student     Student   @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  source      String    @default("TEACHER")
+  teacherId   String?
+  teacher     Teacher?  @relation(fields: [teacherId], references: [id], onDelete: SetNull)
+  sessionId   String?
+  session     Session?  @relation(fields: [sessionId], references: [id], onDelete: SetNull)
+  title       String
+  content     String
+  status      String    @default("PENDING")
+  thresholdAtCreation Int?
+  resolutionNote String?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+  resolvedAt  DateTime?
+
+  @@index([studentId])
+  @@index([status])
 }

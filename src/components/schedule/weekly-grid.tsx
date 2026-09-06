@@ -1,20 +1,29 @@
 "use client";
 
-// Weekly service table grid: Lundi→Samedi columns × 2h time slots (8h→18h).
+// Weekly service table grid: Lundi→Samedi columns × hourly rows (08:00→18:00).
+// Séances de 1h ou 2h — chaque carte occupe visuellement sa durée réelle.
 // Used by the surveillant (edit mode) and by teachers (read-only personal view).
 
 import { useI18n } from "@/lib/i18n-context";
 import { useNow } from "@/lib/hooks";
 import {
-  TIME_SLOTS,
+  HOUR_SLOTS,
+  SCHOOL_START_MIN,
+  SCHOOL_END_MIN,
   DAY_NAMES,
   getSchoolDayOfWeek,
   getMinutesOfDay,
+  minutesToLabel,
   type SlotWithPeople,
 } from "@/lib/schedule";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Plus, X, Loader2 } from "lucide-react";
+
+// Height of one hour row in px
+const HOUR_H = 68;
+// Total grid height (8h → 18h)
+const GRID_H = ((SCHOOL_END_MIN - SCHOOL_START_MIN) / 60) * HOUR_H;
 
 // Subtle color coding per teacher (no blue/indigo per design rules)
 const CELL_COLORS = [
@@ -52,141 +61,197 @@ export function WeeklyGrid({
 
   const todayDow = now ? getSchoolDayOfWeek(now) : null;
   const nowMinutes = now ? getMinutesOfDay(now) : -1;
-  const currentSlotStart = now
-    ? TIME_SLOTS.find((s) => s.startMin <= nowMinutes && nowMinutes < s.endMin)?.startMin ?? null
-    : null;
+  const nowVisible =
+    nowMinutes >= SCHOOL_START_MIN && nowMinutes <= SCHOOL_END_MIN;
+  const nowOffset = ((nowMinutes - SCHOOL_START_MIN) / 60) * HOUR_H;
 
-  function slotsForCell(dow: number, startMin: number): SlotWithPeople[] {
-    return slots.filter((s) => s.dayOfWeek === dow && s.startMin === startMin);
+  /** Click on a day column: compute the hour from the Y position */
+  function handleColumnClick(e: React.MouseEvent<HTMLDivElement>, dow: number) {
+    if (!onEmptyClick) return;
+    const rect = e.currentTarget.getBoundingClientRect();
+    const y = e.clientY - rect.top;
+    const hourIndex = Math.min(9, Math.max(0, Math.floor(y / HOUR_H)));
+    const startMin = SCHOOL_START_MIN + hourIndex * 60;
+    onEmptyClick(dow, startMin, startMin + 60);
   }
 
   return (
     <div className="rounded-lg border bg-card overflow-x-auto">
-      <table className="w-full min-w-[860px] border-collapse text-sm">
-        <thead>
-          <tr>
-            <th className="sticky start-0 z-10 bg-muted/80 backdrop-blur border-b border-e p-2 text-start w-28 min-w-28">
-              <div className="text-xs font-semibold text-muted-foreground">{t.timeSlot}</div>
-            </th>
-            {DAY_NAMES.map((d) => (
-              <th
-                key={d.dow}
-                className={`border-b p-2 text-center text-xs font-semibold ${
-                  todayDow === d.dow
-                    ? "bg-primary/10 text-primary border-b-2 border-b-primary"
-                    : "text-muted-foreground"
-                }`}
-              >
-                <div className="flex items-center justify-center gap-1.5">
-                  {locale === "ar" ? d.ar : d.fr}
-                  {todayDow === d.dow && (
-                    <span className="inline-flex items-center gap-1 rounded-full bg-primary text-primary-foreground px-1.5 py-0.5 text-[10px] font-bold">
-                      <span className="relative flex h-1.5 w-1.5">
-                        <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-primary-foreground opacity-75"></span>
-                        <span className="relative inline-flex rounded-full h-1.5 w-1.5 bg-primary-foreground"></span>
-                      </span>
-                      {t.now}
+      <div className="min-w-[900px]">
+        {/* Header row */}
+        <div className="grid grid-cols-[72px_repeat(6,minmax(0,1fr))] border-b bg-muted/60">
+          <div className="p-2 text-xs font-semibold text-muted-foreground flex items-center justify-center">
+            {t.timeSlot}
+          </div>
+          {DAY_NAMES.map((d) => (
+            <div
+              key={d.dow}
+              className={`p-2 text-center text-xs font-semibold ${
+                todayDow === d.dow
+                  ? "bg-primary/10 text-primary border-b-2 border-b-primary -mb-px"
+                  : "text-muted-foreground"
+              }`}
+            >
+              <div className="flex items-center justify-center gap-1.5">
+                {locale === "ar" ? d.ar : d.fr}
+                {todayDow === d.dow && (
+                  <span className="inline-flex items-center gap-1 rounded-full bg-primary text-primary-foreground px-1.5 py-0.5 text-[10px] font-bold">
+                    <span className="relative flex h-1.5 w-1.5">
+                      <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-primary-foreground opacity-75"></span>
+                      <span className="relative inline-flex rounded-full h-1.5 w-1.5 bg-primary-foreground"></span>
                     </span>
-                  )}
-                </div>
-              </th>
+                    {t.now}
+                  </span>
+                )}
+              </div>
+            </div>
+          ))}
+        </div>
+
+        {/* Body: time axis + 6 day columns */}
+        <div className="grid grid-cols-[72px_repeat(6,minmax(0,1fr))]">
+          {/* Time axis */}
+          <div className="relative border-e" style={{ height: GRID_H }}>
+            {HOUR_SLOTS.map((h) => (
+              <div
+                key={h.id}
+                className="absolute inset-x-0 flex items-start justify-center"
+                style={{ top: (h.startMin - SCHOOL_START_MIN) / 60 * HOUR_H, height: HOUR_H }}
+              >
+                <span className="text-[11px] font-mono text-muted-foreground bg-card px-1 -translate-y-1/2 mt-px">
+                  {minutesToLabel(h.startMin)}
+                </span>
+              </div>
             ))}
-          </tr>
-        </thead>
-        <tbody>
-          {TIME_SLOTS.map((ts) => {
-            const isCurrentRow = currentSlotStart === ts.startMin;
+            <div
+              className="absolute inset-x-0 border-t"
+              style={{ top: GRID_H }}
+            >
+              <span className="text-[11px] font-mono text-muted-foreground bg-card px-1 absolute start-1/2 -translate-x-1/2 -translate-y-1/2">
+                18:00
+              </span>
+            </div>
+          </div>
+
+          {/* Day columns */}
+          {DAY_NAMES.map((d) => {
+            const daySlots = slots
+              .filter((s) => s.dayOfWeek === d.dow)
+              .sort((a, b) => a.startMin - b.startMin);
+            const isToday = todayDow === d.dow;
             return (
-              <tr key={ts.id} className={isCurrentRow ? "bg-amber-50/60 dark:bg-amber-950/20" : ""}>
-                <td
-                  className={`sticky start-0 z-10 border-b border-e p-2 align-middle w-28 min-w-28 ${
-                    isCurrentRow ? "bg-amber-50/95 dark:bg-amber-950/40" : "bg-card"
-                  }`}
-                >
-                  <div className={`text-xs font-mono font-semibold ${isCurrentRow ? "text-amber-700 dark:text-amber-400" : "text-foreground/80"}`}>
-                    {String(Math.floor(ts.startMin / 60)).padStart(2, "0")}:00
-                    <br />
-                    {String(Math.floor(ts.endMin / 60)).padStart(2, "0")}:00
-                  </div>
-                  {isCurrentRow && (
-                    <div className="text-[10px] font-bold text-amber-600 dark:text-amber-400 mt-0.5">
-                      ● {t.inProgress}
+              <div
+                key={d.dow}
+                className={`relative border-e last:border-e-0 ${
+                  isToday ? "bg-primary/[0.04]" : ""
+                } ${onEmptyClick ? "cursor-pointer" : ""}`}
+                style={{ height: GRID_H }}
+                onClick={(e) => handleColumnClick(e, d.dow)}
+              >
+                {/* Hour separators */}
+                {HOUR_SLOTS.map((h) => (
+                  <div
+                    key={h.id}
+                    className="absolute inset-x-0 border-t border-border/50 pointer-events-none"
+                    style={{ top: (h.startMin - SCHOOL_START_MIN) / 60 * HOUR_H }}
+                  />
+                ))}
+
+                {/* "Now" line (today only) */}
+                {isToday && nowVisible && (
+                  <div
+                    className="absolute inset-x-0 z-20 pointer-events-none"
+                    style={{ top: nowOffset }}
+                  >
+                    <div className="relative border-t-2 border-red-500/80">
+                      <span className="absolute -top-2 start-1 bg-red-500 text-white text-[9px] font-bold rounded-full px-1.5 py-px">
+                        {minutesToLabel(nowMinutes)}
+                      </span>
                     </div>
-                  )}
-                </td>
-                {DAY_NAMES.map((d) => {
-                  const cellSlots = slotsForCell(d.dow, ts.startMin);
-                  return (
-                    <td
-                      key={`${ts.id}-${d.dow}`}
-                      className="border-b p-1.5 align-top min-w-[120px]"
-                    >
-                      {loading ? (
-                        <div className="flex items-center justify-center py-4">
-                          <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
+                  </div>
+                )}
+
+                {/* Slots */}
+                {loading ? (
+                  <div className="absolute inset-0 flex items-center justify-center">
+                    <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
+                  </div>
+                ) : (
+                  daySlots.map((slot) => {
+                    const top = ((slot.startMin - SCHOOL_START_MIN) / 60) * HOUR_H;
+                    const hours = (slot.endMin - slot.startMin) / 60;
+                    const height = hours * HOUR_H - 6;
+                    const isCurrent =
+                      isToday &&
+                      slot.startMin <= nowMinutes &&
+                      nowMinutes < slot.endMin;
+                    return (
+                      <div
+                        key={slot.id}
+                        className={`absolute inset-x-1 rounded-md border p-1.5 transition-colors shadow-sm overflow-hidden ${
+                          isCurrent
+                            ? "ring-2 ring-amber-500 border-amber-400 bg-amber-50 dark:bg-amber-950/40"
+                            : teacherColor((slot as any).teacher?.id ?? slot.id)
+                        }`}
+                        style={{ top: top + 3, height }}
+                        onClick={(e) => e.stopPropagation()}
+                      >
+                        <div className="text-[10px] font-mono text-muted-foreground leading-none mb-1">
+                          {minutesToLabel(slot.startMin)}–{minutesToLabel(slot.endMin)}
+                          {isCurrent && (
+                            <span className="ms-1 text-amber-600 dark:text-amber-400 font-bold">● {t.inProgress}</span>
+                          )}
                         </div>
-                      ) : cellSlots.length === 0 ? (
-                        onEmptyClick ? (
-                          <button
-                            onClick={() => onEmptyClick(d.dow, ts.startMin, ts.endMin)}
-                            title={t.emptyCellHint}
-                            className="group w-full h-full min-h-[64px] rounded-md border border-dashed border-transparent hover:border-border hover:bg-accent/40 flex items-center justify-center transition-all"
+                        {showTeacher && (slot as any).teacher && (
+                          <div className="text-xs font-semibold leading-tight pe-4 truncate">
+                            {(slot as any).teacher.lastName} {(slot as any).teacher.firstName?.[0]}.
+                          </div>
+                        )}
+                        <div className="flex flex-wrap items-center gap-1 mt-1">
+                          <Badge variant="secondary" className="text-[10px] px-1.5 py-0 h-4">
+                            {slot.classe?.code}
+                          </Badge>
+                          {(slot as any).groupe && (
+                            <Badge variant="outline" className="text-[10px] px-1.5 py-0 h-4">
+                              {(slot as any).groupe.code}
+                            </Badge>
+                          )}
+                        </div>
+                        {(locale === "ar" && slot.subjectAr) || slot.subject ? (
+                          <div className="text-[11px] text-muted-foreground mt-1 truncate">
+                            {locale === "ar" && slot.subjectAr ? slot.subjectAr : slot.subject}
+                          </div>
+                        ) : null}
+                        {onDelete && (
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            className="absolute top-0.5 end-0.5 h-5 w-5 rounded-full text-muted-foreground/60 hover:text-destructive hover:bg-background/60"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              onDelete(slot);
+                            }}
+                            title={t.delete}
                           >
-                            <Plus className="h-4 w-4 text-muted-foreground/30 group-hover:text-muted-foreground transition-colors" />
-                          </button>
-                        ) : (
-                          <div className="min-h-[64px]" />
-                        )
-                      ) : (
-                        <div className="space-y-1.5">
-                          {cellSlots.map((slot) => (
-                            <div
-                              key={slot.id}
-                              className={`relative rounded-md border p-2 transition-colors ${
-                                slot.id ? teacherColor((slot as any).teacher?.id ?? slot.id) : "bg-muted"
-                              }`}
-                            >
-                              {onDelete && (
-                                <button
-                                  onClick={() => onDelete(slot)}
-                                  className="absolute top-1 end-1 rounded-full p-0.5 text-muted-foreground/60 hover:text-destructive hover:bg-background/60 transition-colors"
-                                  title={t.delete}
-                                >
-                                  <X className="h-3 w-3" />
-                                </button>
-                              )}
-                              {showTeacher && (slot as any).teacher && (
-                                <div className="text-xs font-semibold leading-tight pe-4 truncate">
-                                  {(slot as any).teacher.lastName} {(slot as any).teacher.firstName?.[0]}.
-                                </div>
-                              )}
-                              <div className="flex flex-wrap items-center gap-1 mt-1">
-                                <Badge variant="secondary" className="text-[10px] px-1.5 py-0 h-4">
-                                  {slot.classe?.code}
-                                </Badge>
-                                {(slot as any).groupe && (
-                                  <Badge variant="outline" className="text-[10px] px-1.5 py-0 h-4">
-                                    {(slot as any).groupe.code}
-                                  </Badge>
-                                )}
-                              </div>
-                              {(locale === "ar" && slot.subjectAr) || slot.subject ? (
-                                <div className="text-[11px] text-muted-foreground mt-1 truncate">
-                                  {locale === "ar" && slot.subjectAr ? slot.subjectAr : slot.subject}
-                                </div>
-                              ) : null}
-                            </div>
-                          ))}
-                        </div>
-                      )}
-                    </td>
-                  );
-                })}
-              </tr>
+                            <X className="h-3 w-3" />
+                          </Button>
+                        )}
+                      </div>
+                    );
+                  })
+                )}
+
+                {/* Empty hint */}
+                {onEmptyClick && !loading && daySlots.length === 0 && (
+                  <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
+                    <Plus className="h-4 w-4 text-muted-foreground/25" />
+                  </div>
+                )}
+              </div>
             );
           })}
-        </tbody>
-      </table>
+        </div>
+      </div>
     </div>
   );
 }

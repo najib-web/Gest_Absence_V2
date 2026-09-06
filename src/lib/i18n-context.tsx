@@ -15,11 +15,21 @@ const I18nContext = createContext<I18nContextValue | null>(null);
 const STORAGE_KEY = "abs_locale";
 
 export function I18nProvider({ children }: { children: ReactNode }) {
-  const [locale, setLocaleState] = useState<Locale>(() => {
-    if (typeof window === "undefined") return "fr";
+  // Always start with "fr" to match the server render (avoids hydration mismatch),
+  // then load the saved locale after mount.
+  const [locale, setLocaleState] = useState<Locale>("fr");
+
+  useEffect(() => {
     const saved = localStorage.getItem(STORAGE_KEY) as Locale | null;
-    return saved === "fr" || saved === "ar" ? saved : "fr";
-  });
+    if (saved === "fr" || saved === "ar") {
+      document.documentElement.lang = saved;
+      document.documentElement.dir = getDirection(saved);
+      if (saved !== locale) {
+        const id = setTimeout(() => setLocaleState(saved), 0);
+        return () => clearTimeout(id);
+      }
+    }
+  }, []);
 
   useEffect(() => {
     document.documentElement.lang = locale;

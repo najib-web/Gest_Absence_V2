@@ -28,7 +28,14 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { WeeklyGrid } from "@/components/schedule/weekly-grid";
-import { TIME_SLOTS, DAY_NAMES, slotRangeLabel, type SlotWithPeople } from "@/lib/schedule";
+import {
+  SCHOOL_START_MIN,
+  SCHOOL_END_MIN,
+  SLOT_DURATIONS_H,
+  DAY_NAMES,
+  minutesToLabel,
+  type SlotWithPeople,
+} from "@/lib/schedule";
 
 const SUBJECTS = [
   { fr: "Mathématiques", ar: "الرياضيات" },
@@ -174,7 +181,8 @@ function SlotDialog({
   const { t } = useI18n();
   const [teacherId, setTeacherId] = useState("");
   const [day, setDay] = useState("");
-  const [slotTime, setSlotTime] = useState("");
+  const [startHour, setStartHour] = useState(""); // "8".."17"
+  const [duration, setDuration] = useState("2"); // "1" | "2"
   const [classeId, setClasseId] = useState("");
   const [groupId, setGroupId] = useState("");
   const [subject, setSubject] = useState("");
@@ -182,6 +190,11 @@ function SlotDialog({
 
   const selectedClass = classes.find((c) => c.id === classeId);
   const groups = selectedClass?.groups ?? [];
+
+  // Heures de début possibles selon la durée choisie (fin ≤ 18h)
+  const startHours = Array.from({ length: 10 }, (_, i) => SCHOOL_START_MIN / 60 + i).filter(
+    (h) => h + parseInt(duration) <= SCHOOL_END_MIN / 60
+  );
 
   // Sync form when opened (optionally pre-filled from an empty grid cell)
   const [wasOpen, setWasOpen] = useState(false);
@@ -192,14 +205,21 @@ function SlotDialog({
     setGroupId("");
     setSubject("");
     setDay(preset ? String(preset.dow) : "");
-    setSlotTime(preset ? `${preset.startMin}-${preset.endMin}` : "");
+    if (preset) {
+      setStartHour(String(Math.floor(preset.startMin / 60)));
+      setDuration(String((preset.endMin - preset.startMin) / 60 || 2));
+    } else {
+      setStartHour("");
+      setDuration("2");
+    }
   } else if (!open && wasOpen) {
     setWasOpen(false);
   }
 
   async function submit(e: React.FormEvent) {
     e.preventDefault();
-    const [startMin, endMin] = slotTime.split("-").map((x) => parseInt(x));
+    const startMin = parseInt(startHour) * 60;
+    const endMin = startMin + parseInt(duration) * 60;
     const subj = SUBJECTS.find((s) => s.fr === subject);
     setSaving(true);
     try {
@@ -267,20 +287,45 @@ function SlotDialog({
               </Select>
             </div>
             <div className="space-y-2">
-              <Label>{t.selectSlotTime}</Label>
-              <Select value={slotTime} onValueChange={setSlotTime}>
+              <Label>{t.duration}</Label>
+              <Select
+                value={duration}
+                onValueChange={(v) => {
+                  setDuration(v);
+                  // Ajuster l'heure de début si la fin dépasserait 18h
+                  if (startHour && parseInt(startHour) + parseInt(v) > SCHOOL_END_MIN / 60) {
+                    setStartHour(String(SCHOOL_END_MIN / 60 - parseInt(v)));
+                  }
+                }}
+              >
                 <SelectTrigger>
-                  <SelectValue placeholder="08:00 → 18:00" />
+                  <SelectValue placeholder={t.selectDuration} />
                 </SelectTrigger>
                 <SelectContent>
-                  {TIME_SLOTS.map((ts) => (
-                    <SelectItem key={ts.id} value={`${ts.startMin}-${ts.endMin}`}>
-                      {slotRangeLabel(ts.startMin, ts.endMin)}
+                  {SLOT_DURATIONS_H.map((h) => (
+                    <SelectItem key={h} value={String(h)}>
+                      {h} {t.hourUnit}
                     </SelectItem>
                   ))}
                 </SelectContent>
               </Select>
             </div>
+          </div>
+
+          <div className="space-y-2">
+            <Label>{t.startTime}</Label>
+            <Select value={startHour} onValueChange={setStartHour}>
+              <SelectTrigger>
+                <SelectValue placeholder="08:00 → 18:00" />
+              </SelectTrigger>
+              <SelectContent>
+                {startHours.map((h) => (
+                  <SelectItem key={h} value={String(h)}>
+                    {minutesToLabel(h * 60)} → {minutesToLabel((h + parseInt(duration)) * 60)}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
           </div>
 
           <div className="grid grid-cols-2 gap-3">
@@ -330,7 +375,7 @@ function SlotDialog({
             <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>{t.cancel}</Button>
             <Button
               type="submit"
-              disabled={saving || !teacherId || !day || !slotTime || !classeId || !subject}
+              disabled={saving || !teacherId || !day || !startHour || !classeId || !subject}
             >
               {saving ? <Loader2 className="h-4 w-4 me-2 animate-spin" /> : null}
               {t.save}

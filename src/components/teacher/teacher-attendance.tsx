@@ -80,6 +80,7 @@ export function TeacherAttendance({
   const [search, setSearch] = useState("");
   const [saving, setSaving] = useState(false);
   const [reasonTarget, setReasonTarget] = useState<{ id: string; name: string } | null>(null);
+  const [reportTarget, setReportTarget] = useState<{ id: string; name: string } | null>(null);
 
   // Initialize statuses from existing absences
   useEffect(() => {
@@ -136,7 +137,8 @@ export function TeacherAttendance({
 
   function toggleOriented(id: string) {
     if (statuses[id] === "PRESENT") return;
-    setOriented((prev) => ({ ...prev, [id]: !prev[id] }));
+    const s = students.find((x) => x.id === id);
+    setReportTarget({ id, name: s ? `${s.lastName} ${s.firstName}` : "" });
   }
 
   async function save() {
@@ -291,6 +293,7 @@ export function TeacherAttendance({
                             className={`h-7 px-2 ${isOriented ? "bg-amber-600 hover:bg-amber-700" : ""}`}
                             disabled={st === "PRESENT"}
                             onClick={() => toggleOriented(s.id)}
+                            title={t.orientStudentReport}
                           >
                             <Send className="h-3 w-3" />
                           </Button>
@@ -337,6 +340,21 @@ export function TeacherAttendance({
             setReason(reasonTarget.id, reason);
             setReasonTarget(null);
           }
+        }}
+      />
+
+      <OrientationReportDialog
+        target={reportTarget}
+        sessionId={sessionId}
+        existingAbsenceId={
+          reportTarget
+            ? data.session.students.find((x) => x.id === reportTarget.id)?.absence?.id ?? null
+            : null
+        }
+        onClose={() => setReportTarget(null)}
+        onSent={(studentId) => {
+          setOriented((prev) => ({ ...prev, [studentId]: true }));
+          setReportTarget(null);
         }}
       />
     </div>
@@ -415,6 +433,85 @@ function ReasonDialog({
           <Button type="button" variant="outline" onClick={onClose}>{t.cancel}</Button>
           <Button type="button" onClick={() => onSave(reason)}>{t.save}</Button>
         </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+// Dialog: teacher writes an orientation report for a student and sends it to the surveillant
+function OrientationReportDialog({
+  target,
+  sessionId,
+  existingAbsenceId,
+  onClose,
+  onSent,
+}: {
+  target: { id: string; name: string } | null;
+  sessionId: string;
+  existingAbsenceId: string | null;
+  onClose: () => void;
+  onSent: (studentId: string) => void;
+}) {
+  const { t } = useI18n();
+  const [content, setContent] = useState("");
+  const [sending, setSending] = useState(false);
+
+  async function submit(e: React.FormEvent) {
+    e.preventDefault();
+    if (!target) return;
+    setSending(true);
+    try {
+      await apiPost("/api/orientations", {
+        studentId: target.id,
+        title: t.orientationTitle,
+        content,
+        sessionId,
+        absenceId: existingAbsenceId ?? undefined,
+      });
+      toast.success(t.reportSent);
+      setContent("");
+      onSent(target.id);
+    } catch (e) {
+      toast.error((e as Error).message);
+    } finally {
+      setSending(false);
+    }
+  }
+
+  return (
+    <Dialog open={!!target} onOpenChange={(v) => !v && onClose()}>
+      <DialogContent>
+        <DialogHeader>
+          <DialogTitle className="flex items-center gap-2">
+            <Send className="h-4 w-4 text-amber-600" />
+            {t.writeReport}
+          </DialogTitle>
+          <DialogDescription>
+            {target?.name} — {t.reportDesc}
+          </DialogDescription>
+        </DialogHeader>
+        <form onSubmit={submit} className="space-y-4">
+          <div className="space-y-2">
+            <Label htmlFor="rep-content">{t.reportContent}</Label>
+            <Textarea
+              id="rep-content"
+              value={content}
+              onChange={(e) => setContent(e.target.value)}
+              rows={5}
+              placeholder={t.reportPlaceholder}
+              required
+            />
+          </div>
+          <DialogFooter>
+            <Button type="button" variant="outline" onClick={onClose}>
+              {t.cancel}
+            </Button>
+            <Button type="submit" disabled={sending || !content.trim()}>
+              {sending ? <Loader2 className="h-4 w-4 me-2 animate-spin" /> : <Send className="h-4 w-4 me-2" />}
+              {t.sendToSurveillant}
+            </Button>
+          </DialogFooter>
+        </form>
       </DialogContent>
     </Dialog>
   );

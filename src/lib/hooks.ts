@@ -67,6 +67,17 @@ export async function apiPatch(url: string, body: unknown) {
   return data;
 }
 
+export async function apiPut(url: string, body: unknown) {
+  const res = await fetch(url, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  const data = await res.json();
+  if (!res.ok) throw new Error(data.error || "Erreur");
+  return data;
+}
+
 export async function apiDelete(url: string) {
   const res = await fetch(url, { method: "DELETE" });
   const data = await res.json();

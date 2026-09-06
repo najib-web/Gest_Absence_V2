@@ -52,6 +52,7 @@ model Classe {
   groups     Groupe[]
   services   ServiceTable[]
   sessions   Session[]
+  slots      ServiceSlot[]
 }
 
 model Groupe {
@@ -63,6 +64,8 @@ model Groupe {
   classe    Classe   @relation(fields: [classeId], references: [id], onDelete: Cascade)
   students  Student[]
   services  ServiceTable[]
+  sessions  Session[]
+  slots     ServiceSlot[]
 
   @@unique([code, classeId])
 }
@@ -102,6 +105,7 @@ model Teacher {
 
   services  ServiceTable[]
   sessions  Session[]
+  slots     ServiceSlot[]
 }
 
 // "Table de service" — a single assignment: Teacher X teaches Classe Y (optionally Groupe Z) for subject W
@@ -123,6 +127,27 @@ model ServiceTable {
   @@unique([teacherId, classeId, groupId, subject])
 }
 
+// "Grille horaire hebdomadaire" — one cell of the weekly service table
+// dayOfWeek: 1 = Lundi ... 6 = Samedi ; startMin/endMin: minutes since midnight (480 = 08:00)
+model ServiceSlot {
+  id        String   @id @default(cuid())
+  teacherId String
+  teacher   Teacher  @relation(fields: [teacherId], references: [id], onDelete: Cascade)
+  dayOfWeek Int      // 1 = Lundi ... 6 = Samedi (dimanche = 0, non scolaire)
+  startMin  Int      // ex: 480 = 08:00
+  endMin    Int      // ex: 600 = 10:00
+  classeId  String
+  classe    Classe   @relation(fields: [classeId], references: [id], onDelete: Cascade)
+  groupId   String?
+  groupe    Groupe?  @relation(fields: [groupId], references: [id], onDelete: SetNull)
+  subject   String
+  subjectAr String?
+  createdAt DateTime @default(now())
+
+  @@unique([teacherId, dayOfWeek, startMin])
+  @@index([dayOfWeek, startMin])
+}
+
 // =====================
 // Sessions & Absences
 // =====================
@@ -133,6 +158,8 @@ model Session {
   teacher     Teacher  @relation(fields: [teacherId], references: [id], onDelete: Cascade)
   classeId    String
   classe      Classe   @relation(fields: [classeId], references: [id], onDelete: Cascade)
+  groupId     String?
+  groupe      Groupe?  @relation(fields: [groupId], references: [id], onDelete: SetNull)
   serviceId   String?
   service     ServiceTable? @relation(fields: [serviceId], references: [id], onDelete: SetNull)
   date        DateTime

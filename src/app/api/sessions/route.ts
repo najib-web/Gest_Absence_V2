@@ -29,6 +29,7 @@ export async function GET(req: Request) {
     include: {
       teacher: true,
       classe: true,
+      groupe: true,
       service: true,
       _count: { select: { absences: true } },
     },
@@ -41,7 +42,7 @@ export async function POST(req: NextRequest) {
   if (!user) return NextResponse.json({ error: "Non authentifié" }, { status: 401 });
   try {
     const body = await req.json();
-    const { teacherId, classeId, serviceId, date, subject, subjectAr } = body;
+    const { teacherId, classeId, groupId, serviceId, date, subject, subjectAr, dedupeFrom } = body;
     if (!teacherId || !classeId || !date || !subject) {
       return NextResponse.json({ error: "Champs manquants" }, { status: 400 });
     }
@@ -50,16 +51,35 @@ export async function POST(req: NextRequest) {
       ? user.teacherId
       : teacherId;
 
+    // Dedupe: when opening the roll call from the weekly grid, reuse the session
+    // already created today for the same slot (teacher + classe + group + subject)
+    if (dedupeFrom) {
+      const fromDate = new Date(dedupeFrom);
+      const existing = await db.session.findFirst({
+        where: {
+          teacherId: finalTeacherId,
+          classeId,
+          groupId: groupId || null,
+          subject,
+          date: { gte: fromDate },
+        },
+        orderBy: { date: "desc" },
+        include: { teacher: true, classe: true, groupe: true },
+      });
+      if (existing) return NextResponse.json({ session: existing, existing: true });
+    }
+
     const session = await db.session.create({
       data: {
         teacherId: finalTeacherId,
         classeId,
+        groupId: groupId || null,
         serviceId: serviceId || null,
         date: new Date(date),
         subject,
         subjectAr: subjectAr || null,
       },
-      include: { teacher: true, classe: true },
+      include: { teacher: true, classe: true, groupe: true },
     });
     return NextResponse.json({ session });
   } catch (e) {

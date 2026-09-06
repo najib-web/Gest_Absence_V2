@@ -167,8 +167,14 @@ export function TeacherAttendance({
           </Button>
           <div>
             <h2 className="text-2xl font-bold tracking-tight">{t.takeAttendance}</h2>
-            <p className="text-sm text-muted-foreground">
-              {session.classe.code} — {session.subject} · {formatDate(session.date, locale)}
+            <p className="text-sm text-muted-foreground flex items-center gap-1.5 flex-wrap">
+              <span>{session.classe.code}</span>
+              {(session as any).groupe && (
+                <Badge variant="outline" className="text-[10px] px-1.5 py-0 h-4">
+                  {(session as any).groupe.code}
+                </Badge>
+              )}
+              <span>— {session.subject} · {formatDate(session.date, locale)}</span>
             </p>
           </div>
         </div>

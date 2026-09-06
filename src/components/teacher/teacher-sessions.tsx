@@ -93,7 +93,10 @@ export function TeacherSessions({ user, onOpenAttendance }: { user: SessionUser;
                         {formatDate(s.date, locale)}
                       </TableCell>
                       <TableCell>
-                        <Badge variant="secondary">{s.classe.code}</Badge>
+                        <div className="flex items-center gap-1.5">
+                          <Badge variant="secondary">{s.classe.code}</Badge>
+                          {s.groupe && <Badge variant="outline">{s.groupe.code}</Badge>}
+                        </div>
                       </TableCell>
                       <TableCell className="font-medium">{s.subject}</TableCell>
                       <TableCell className="text-center">

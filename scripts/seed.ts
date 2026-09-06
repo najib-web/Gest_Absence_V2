@@ -9,6 +9,7 @@ async function main() {
   // Clean
   await db.absence.deleteMany();
   await db.session.deleteMany();
+  await db.serviceSlot.deleteMany();
   await db.serviceTable.deleteMany();
   await db.teacher.deleteMany();
   await db.student.deleteMany();
@@ -189,6 +190,39 @@ async function main() {
     },
   });
 
+  // === Grille horaire hebdomadaire (Lundi→Samedi, 8h→18h) ===
+  // dayOfWeek: 1=Lundi ... 6=Samedi ; startMin/endMin in minutes since midnight
+  const S = (dow: number, h1: number, h2: number) => ({ dayOfWeek: dow, startMin: h1 * 60, endMin: h2 * 60 });
+  const slotDefs: {
+    teacherId: string; dayOfWeek: number; startMin: number; endMin: number;
+    classeId: string; groupId?: string; subject: string; subjectAr: string;
+  }[] = [
+    // --- Mme Bennani (Mathématiques) ---
+    { teacherId: teacher1.id, classeId: tcsf1.id, subject: "Mathématiques", subjectAr: "الرياضيات", ...S(1, 8, 10) },
+    { teacherId: teacher1.id, classeId: tcsf2.id, subject: "Mathématiques", subjectAr: "الرياضيات", ...S(1, 10, 12) },
+    { teacherId: teacher1.id, classeId: tcsf2.id, subject: "Mathématiques", subjectAr: "الرياضيات", ...S(2, 8, 10) },
+    { teacherId: teacher1.id, classeId: tcsf1.id, groupId: g1.id, subject: "Mathématiques (TP)", subjectAr: "الرياضيات (أعمال تطبيقية)", ...S(2, 10, 12) },
+    { teacherId: teacher1.id, classeId: tcsf1.id, subject: "Mathématiques", subjectAr: "الرياضيات", ...S(3, 8, 10) },
+    { teacherId: teacher1.id, classeId: tcsf2.id, subject: "Mathématiques", subjectAr: "الرياضيات", ...S(3, 14, 16) },
+    { teacherId: teacher1.id, classeId: tcsf1.id, subject: "Mathématiques", subjectAr: "الرياضيات", ...S(4, 10, 12) },
+    { teacherId: teacher1.id, classeId: tcsf2.id, subject: "Mathématiques", subjectAr: "الرياضيات", ...S(4, 14, 16) },
+    { teacherId: teacher1.id, classeId: tcsf1.id, subject: "Mathématiques", subjectAr: "الرياضيات", ...S(5, 8, 10) },
+    { teacherId: teacher1.id, classeId: tcsf1.id, groupId: g2.id, subject: "Mathématiques (TP)", subjectAr: "الرياضيات (أعمال تطبيقية)", ...S(5, 10, 12) },
+    { teacherId: teacher1.id, classeId: tcsf1.id, subject: "Mathématiques", subjectAr: "الرياضيات", ...S(6, 10, 12) },
+    // --- M. Saidi (Physique-Chimie) ---
+    { teacherId: teacher2.id, classeId: tcsf1.id, subject: "Physique-Chimie", subjectAr: "الفيزياء والكيمياء", ...S(1, 10, 12) },
+    { teacherId: teacher2.id, classeId: tcsf1.id, subject: "Physique-Chimie", subjectAr: "الفيزياء والكيمياء", ...S(2, 14, 16) },
+    { teacherId: teacher2.id, classeId: tcsf1.id, groupId: g2.id, subject: "Physique (TP)", subjectAr: "الفيزياء (أعمال تطبيقية)", ...S(3, 10, 12) },
+    { teacherId: teacher2.id, classeId: tcsf1.id, subject: "Physique-Chimie", subjectAr: "الفيزياء والكيمياء", ...S(3, 16, 18) },
+    { teacherId: teacher2.id, classeId: tcsf1.id, subject: "Physique-Chimie", subjectAr: "الفيزياء والكيمياء", ...S(4, 8, 10) },
+    { teacherId: teacher2.id, classeId: tcsf1.id, subject: "Physique-Chimie", subjectAr: "الفيزياء والكيمياء", ...S(5, 14, 16) },
+    { teacherId: teacher2.id, classeId: tcsf1.id, groupId: g3.id, subject: "Physique (TP)", subjectAr: "الفيزياء (أعمال تطبيقية)", ...S(6, 8, 10) },
+    { teacherId: teacher2.id, classeId: tcsf1.id, subject: "Physique-Chimie", subjectAr: "الفيزياء والكيمياء", ...S(6, 14, 16) },
+  ];
+  for (const def of slotDefs) {
+    await db.serviceSlot.create({ data: def });
+  }
+
   // === Students (sample for TCSF-1) ===
   const sampleFirstNames = [
     "Youssef", "Aya", "Mehdi", "Salma", "Anas", "Lina", "Omar", "Sara",
@@ -294,7 +328,7 @@ async function main() {
   console.log("Demo accounts:");
   console.log("  Surveillant: surveillant@edu.ma / surveillant123");
   console.log("  Enseignant:  enseignant@edu.ma / enseignant123");
-  console.log(`Created: 3 users, 3 niveaux, 4 classes, 3 groups, 2 teachers, 5 service tables, ${students.length + 8} students, 2 sessions, 8 absences`);
+  console.log(`Created: 3 users, 3 niveaux, 4 classes, 3 groups, 2 teachers, 5 service tables, ${slotDefs.length} weekly slots, ${students.length + 8} students, 2 sessions, 8 absences`);
 }
 
 main()

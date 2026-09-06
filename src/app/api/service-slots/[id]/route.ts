@@ -1,0 +1,18 @@
+import { NextRequest, NextResponse } from "next/server";
+import { db } from "@/lib/db";
+import { getCurrentUser } from "@/lib/auth";
+
+// DELETE /api/service-slots/[id] — remove a schedule cell (surveillant only)
+export async function DELETE(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
+  const user = await getCurrentUser(req);
+  if (!user || user.role !== "SURVEILLANT") {
+    return NextResponse.json({ error: "Accès refusé" }, { status: 403 });
+  }
+  const { id } = await params;
+  try {
+    await db.serviceSlot.delete({ where: { id } });
+    return NextResponse.json({ success: true });
+  } catch (e) {
+    return NextResponse.json({ error: "Erreur de suppression" }, { status: 500 });
+  }
+}

@@ -12,6 +12,7 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
     include: {
       teacher: true,
       classe: { include: { niveau: true, groups: true } },
+      groupe: true,
       service: true,
       absences: { include: { student: true } },
     },
@@ -19,9 +20,13 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
 
   if (!session) return NextResponse.json({ error: "Session introuvable" }, { status: 404 });
 
-  // Get all students of the class for attendance marking
+  // Get students of the class — filtered to the session's group when the roll
+  // call targets a specific group (from the weekly service grid)
   const students = await db.student.findMany({
-    where: { classeId: session.classeId },
+    where: {
+      classeId: session.classeId,
+      ...(session.groupId ? { groupId: session.groupId } : {}),
+    },
     orderBy: [{ lastName: "asc" }, { firstName: "asc" }],
   });
 

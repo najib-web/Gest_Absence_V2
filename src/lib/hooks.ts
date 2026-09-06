@@ -93,3 +93,20 @@ export function formatDateShort(d: string | Date, locale: string = "fr") {
     day: "numeric",
   });
 }
+
+/**
+ * Live "system date" ticker. Returns null during SSR/first render, then the
+ * current Date, refreshed every `intervalMs`. Used for current-session detection.
+ */
+export function useNow(intervalMs: number = 30_000): Date | null {
+  const [now, setNow] = useState<Date | null>(null);
+  useEffect(() => {
+    const t0 = setTimeout(() => setNow(new Date()), 0);
+    const timer = setInterval(() => setNow(new Date()), intervalMs);
+    return () => {
+      clearTimeout(t0);
+      clearInterval(timer);
+    };
+  }, [intervalMs]);
+  return now;
+}

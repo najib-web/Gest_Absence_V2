@@ -1,8 +1,9 @@
 "use client";
 
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { useI18n } from "@/lib/i18n-context";
 import { useFetch, apiPost, apiDelete } from "@/lib/hooks";
+import { SUBJECTS } from "@/lib/subjects";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -15,15 +16,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Badge } from "@/components/ui/badge";
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/components/ui/table";
-import { Plus, Trash2, Loader2, BookOpen, UserPlus, CalendarClock, Layers } from "lucide-react";
+import { Plus, Trash2, Loader2, BookOpen, UserPlus, CalendarClock, Layers, Upload, Download, FileSpreadsheet, CheckCircle2, XCircle } from "lucide-react";
 import { toast } from "sonner";
 import {
   Dialog,
@@ -33,21 +26,28 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table";
 
-const SUBJECTS = [
-  { fr: "Mathématiques", ar: "الرياضيات" },
-  { fr: "Physique-Chimie", ar: "الفيزياء والكيمياء" },
-  { fr: "SVT", ar: "علوم الحياة والأرض" },
-  { fr: "Français", ar: "الفرنسية" },
-  { fr: "Arabe", ar: "العربية" },
-  { fr: "Anglais", ar: "الإنجليزية" },
-  { fr: "Philosophie", ar: "الفلسفة" },
-  { fr: "Histoire-Géo", ar: "التاريخ والجغرافيا" },
-  { fr: "Informatique", ar: "المعلوميات" },
-  { fr: "EPS", ar: "التربية البدنية" },
-  { fr: "Mathématiques (TP)", ar: "الرياضيات (أعمال تطبيقية)" },
-  { fr: "Physique (TP)", ar: "الفيزياء (أعمال تطبيقية)" },
-];
+interface TeacherPreviewRow {
+  index: number;
+  firstName: string;
+  lastName: string;
+  matiere: string;
+  matiereAr: string | null;
+  emailInput: string;
+  email: string;
+  emailGenerated: boolean;
+  password: string;
+  valid: boolean;
+  errorCode?: string;
+}
 
 export function AdminTeachers() {
   const { t } = useI18n();
@@ -57,10 +57,73 @@ export function AdminTeachers() {
 
   const [teacherOpen, setTeacherOpen] = useState(false);
   const [serviceOpen, setServiceOpen] = useState(false);
+  const [importOpen, setImportOpen] = useState(false);
+  const [previewRows, setPreviewRows] = useState<TeacherPreviewRow[]>([]);
+  const [uploading, setUploading] = useState(false);
+  const [committing, setCommitting] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const lastFileRef = useRef<File | null>(null);
 
   const teachers = teachersData?.teachers ?? [];
   const classes = classesData?.classes ?? [];
   const services = servicesData?.services ?? [];
+
+  async function handleFile(file: File) {
+    lastFileRef.current = file;
+    setUploading(true);
+    setPreviewRows([]);
+    try {
+      const fd = new FormData();
+      fd.append("file", file);
+      fd.append("mode", "preview");
+      const res = await fetch("/api/teachers/import", { method: "POST", body: fd });
+      const data = await res.json();
+      if (!res.ok) {
+        toast.error(data.error || t.error);
+        return;
+      }
+      setPreviewRows(data.rows);
+      setImportOpen(true);
+      toast.success(`${data.totalRows} ${t.rowsFound}`);
+    } catch (e) {
+      toast.error((e as Error).message);
+    } finally {
+      setUploading(false);
+    }
+  }
+
+  async function commitImport() {
+    if (previewRows.length === 0) return;
+    setCommitting(true);
+    try {
+      const file = lastFileRef.current;
+      if (!file) {
+        toast.error(t.noFileSelected);
+        return;
+      }
+      const fd = new FormData();
+      fd.append("file", file);
+      fd.append("mode", "commit");
+      const res = await fetch("/api/teachers/import", { method: "POST", body: fd });
+      const data = await res.json();
+      if (!res.ok) {
+        toast.error(data.error || t.error);
+        return;
+      }
+      toast.success(
+        `${data.created} ${t.teachersImported}` +
+        (data.updated ? `, ${data.updated} ${t.teachersUpdated}` : "") +
+        (data.skipped ? `, ${data.skipped} ${t.rowsSkipped.toLowerCase()}` : "")
+      );
+      setImportOpen(false);
+      setPreviewRows([]);
+      refresh();
+    } catch (e) {
+      toast.error((e as Error).message);
+    } finally {
+      setCommitting(false);
+    }
+  }
 
   async function deleteService(id: string) {
     if (!confirm(t.confirmDelete)) return;
@@ -81,6 +144,23 @@ export function AdminTeachers() {
           <p className="text-sm text-muted-foreground">{t.serviceTablesDesc}</p>
         </div>
         <div className="flex gap-2">
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => {
+              const a = document.createElement("a");
+              a.href = "/templates/Liste%20enseignants.xlsx";
+              a.download = "Liste enseignants.xlsx";
+              a.click();
+            }}
+          >
+            <Download className="h-4 w-4 me-2" />
+            {t.templateProfs}
+          </Button>
+          <Button variant="outline" size="sm" onClick={() => fileInputRef.current?.click()} disabled={uploading}>
+            {uploading ? <Loader2 className="h-4 w-4 me-2 animate-spin" /> : <Upload className="h-4 w-4 me-2" />}
+            {t.importTeachers}
+          </Button>
           <Button variant="outline" size="sm" onClick={() => setTeacherOpen(true)}>
             <UserPlus className="h-4 w-4 me-2" />
             {t.createTeacher}
@@ -89,6 +169,17 @@ export function AdminTeachers() {
             <Plus className="h-4 w-4 me-2" />
             {t.assignService}
           </Button>
+          <input
+            ref={fileInputRef}
+            type="file"
+            accept=".xlsx,.xls,.csv"
+            className="hidden"
+            onChange={(e) => {
+              const f = e.target.files?.[0];
+              if (f) handleFile(f);
+              e.target.value = "";
+            }}
+          />
         </div>
       </div>
 
@@ -228,6 +319,71 @@ export function AdminTeachers() {
         onSaved={() => refreshServices()}
         subjects={SUBJECTS}
       />
+
+      {/* Import Teachers Preview Modal */}
+      <Dialog open={importOpen} onOpenChange={setImportOpen}>
+        <DialogContent className="max-w-4xl max-h-[85vh] overflow-hidden flex flex-col">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <FileSpreadsheet className="h-5 w-5 text-primary" />
+              {t.importTeachers}
+            </DialogTitle>
+            <DialogDescription>
+              {previewRows.length} {t.rowsFound} — {t.emailAutoGenerated} ({t.passwordDefault} : enseignant123)
+            </DialogDescription>
+          </DialogHeader>
+          <div className="flex-1 overflow-y-auto -mx-6 px-6">
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead className="w-12">{t.status}</TableHead>
+                  <TableHead>{t.lastName}</TableHead>
+                  <TableHead>{t.firstName}</TableHead>
+                  <TableHead>{t.subject}</TableHead>
+                  <TableHead>{t.email}</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {previewRows.map((r) => (
+                  <TableRow key={r.index}>
+                    <TableCell>
+                      {r.valid ? (
+                        <CheckCircle2 className="h-4 w-4 text-emerald-500" />
+                      ) : (
+                        <XCircle className="h-4 w-4 text-destructive" />
+                      )}
+                    </TableCell>
+                    <TableCell className="font-medium">{r.lastName}</TableCell>
+                    <TableCell>{r.firstName}</TableCell>
+                    <TableCell>
+                      {r.matiere ? (
+                        <Badge variant="secondary">{r.matiere}</Badge>
+                      ) : (
+                        <span className="text-xs text-destructive">{t.errMatiereMissing}</span>
+                      )}
+                    </TableCell>
+                    <TableCell className="text-xs">
+                      {r.email}
+                      {r.emailGenerated && (
+                        <Badge variant="outline" className="ms-2 text-[10px] text-muted-foreground">auto</Badge>
+                      )}
+                    </TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setImportOpen(false)}>
+              {t.cancel}
+            </Button>
+            <Button onClick={commitImport} disabled={committing || previewRows.length === 0}>
+              {committing ? <Loader2 className="h-4 w-4 me-2 animate-spin" /> : <Upload className="h-4 w-4 me-2" />}
+              {t.confirmImport} ({previewRows.filter((r) => r.valid).length})
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

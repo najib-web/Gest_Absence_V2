@@ -32,7 +32,6 @@ import {
   CheckCircle2,
   XCircle,
   Loader2,
-  AlertCircle,
   Users,
   Plus,
 } from "lucide-react";
@@ -53,8 +52,15 @@ interface PreviewRow {
   classeCode: string;
   classeId: string | null;
   classeLabel: string;
+  classeWillBeCreated: boolean;
   niveauLabel: string;
   resolvable: boolean;
+}
+
+interface ClasseToCreate {
+  code: string;
+  niveauCode: string;
+  niveauLabel: string;
 }
 
 export function AdminStudents() {
@@ -69,8 +75,10 @@ export function AdminStudents() {
   const { data: classesData } = useFetch<{ classes: any[] }>("/api/classes");
 
   const [previewRows, setPreviewRows] = useState<PreviewRow[]>([]);
+  const [classesToCreate, setClassesToCreate] = useState<ClasseToCreate[]>([]);
   const [uploading, setUploading] = useState(false);
   const [committing, setCommitting] = useState(false);
+  const lastFileRef = useRef<File | null>(null);
 
   const students = studentsData?.students ?? [];
   const classes = classesData?.classes ?? [];
@@ -89,6 +97,7 @@ export function AdminStudents() {
   });
 
   async function handleFile(file: File) {
+    lastFileRef.current = file;
     setUploading(true);
     setPreviewRows([]);
     try {
@@ -102,6 +111,7 @@ export function AdminStudents() {
         return;
       }
       setPreviewRows(data.rows);
+      setClassesToCreate(data.classesToCreate ?? []);
       setPreviewOpen(true);
       toast.success(`${data.totalRows} ${t.rowsFound}`);
     } catch (e) {
@@ -116,7 +126,7 @@ export function AdminStudents() {
     setCommitting(true);
     try {
       // Re-upload in commit mode (re-parse + insert)
-      const file = fileInputRef.current?.files?.[0];
+      const file = lastFileRef.current;
       if (!file) {
         toast.error(t.noFileSelected);
         return;
@@ -130,7 +140,11 @@ export function AdminStudents() {
         toast.error(data.error || t.error);
         return;
       }
-      toast.success(`${data.inserted} ${t.studentsImported}${data.skipped ? `, ${data.skipped} ignorés` : ""}`);
+      toast.success(
+        `${data.inserted} ${t.studentsImported}` +
+        (data.classesCreated ? `, ${data.classesCreated} ${t.classes} ${t.created.toLowerCase()}` : "") +
+        (data.skipped ? `, ${data.skipped} ${t.rowsSkipped.toLowerCase()}` : "")
+      );
       setPreviewOpen(false);
       setPreviewRows([]);
       refresh();
@@ -141,23 +155,12 @@ export function AdminStudents() {
     }
   }
 
-  async function downloadTemplate() {
-    // Generate a small CSV template
-    const headers = ["Code Massar", "Nom", "Prénom", "Classe", "Niveau"];
-    const sample = [
-      ["R13000001", "Alaoui", "Youssef", "TCSF-1", "Tronc Commun"],
-      ["R13000002", "Benjelloun", "Aya", "TCSF-1", "Tronc Commun"],
-    ];
-    const csv = [headers, ...sample]
-      .map((row) => row.map((c) => `"${c}"`).join(","))
-      .join("\n");
-    const blob = new Blob(["\uFEFF" + csv], { type: "text/csv;charset=utf-8" });
-    const url = URL.createObjectURL(blob);
+  function downloadTemplate() {
+    // Fichier modèle Excel officiel (élèves + classe + niveau)
     const a = document.createElement("a");
-    a.href = url;
-    a.download = "modele_liste_eleves.csv";
+    a.href = "/templates/ListEleve_20260905.xlsx";
+    a.download = "ListEleve_20260905.xlsx";
     a.click();
-    URL.revokeObjectURL(url);
   }
 
   async function deleteStudent(id: string) {
@@ -330,10 +333,24 @@ export function AdminStudents() {
               {t.importPreview}
             </DialogTitle>
             <DialogDescription>
-              {previewRows.length} {t.rowsFound} — {t.confirmImport}
+              {previewRows.length} {t.rowsFound} — {t.classeAutoCreated}
             </DialogDescription>
           </DialogHeader>
           <div className="flex-1 overflow-y-auto -mx-6 px-6">
+            {classesToCreate.length > 0 && (
+              <div className="mb-3 rounded-md border border-emerald-200 bg-emerald-50 dark:border-emerald-900 dark:bg-emerald-950/40 p-3">
+                <p className="text-sm font-medium text-emerald-800 dark:text-emerald-300 flex items-center gap-2">
+                  <Plus className="h-4 w-4" /> {t.classesToCreate} ({classesToCreate.length})
+                </p>
+                <div className="flex flex-wrap gap-1.5 mt-2">
+                  {classesToCreate.map((c) => (
+                    <Badge key={c.code} variant="outline" className="text-emerald-700 dark:text-emerald-400 border-emerald-300 dark:border-emerald-800">
+                      {c.code} · {c.niveauLabel}
+                    </Badge>
+                  ))}
+                </div>
+              </div>
+            )}
             <Table>
               <TableHeader>
                 <TableRow>
@@ -359,13 +376,12 @@ export function AdminStudents() {
                     <TableCell className="font-medium">{r.lastName}</TableCell>
                     <TableCell>{r.firstName}</TableCell>
                     <TableCell>
-                      {r.resolvable ? (
+                      <div className="flex items-center gap-1.5">
                         <Badge variant="outline">{r.classeLabel}</Badge>
-                      ) : (
-                        <span className="text-xs text-destructive flex items-center gap-1">
-                          <AlertCircle className="h-3 w-3" /> {r.classeLabel}
-                        </span>
-                      )}
+                        {r.classeWillBeCreated && (
+                          <Badge className="bg-emerald-600 text-white text-[10px]">+ {t.newClasse}</Badge>
+                        )}
+                      </div>
                     </TableCell>
                     <TableCell className="text-xs text-muted-foreground">{r.niveauLabel}</TableCell>
                   </TableRow>

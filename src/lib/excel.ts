@@ -8,6 +8,328 @@ export interface ParsedStudentRow {
   niveauCode?: string;
 }
 
+// ============
+// Shared helpers
+// ============
+
+/** Lowercase, trim, collapse spaces, remove latin accents (Arabic unchanged). */
+export function deaccent(s: string): string {
+  return String(s || "")
+    .toLowerCase()
+    .trim()
+    .replace(/\s+/g, " ")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "");
+}
+
+interface ColSpec {
+  keys: string[];
+  exclude?: string[];
+}
+
+/**
+ * Detect column indexes from a header row.
+ * For each column, the best-scoring field wins (exact=3, startsWith=2, includes=1).
+ * Each field is assigned at most one column, each column at most one field.
+ */
+export function detectColumns(
+  headers: string[],
+  spec: Record<string, ColSpec>
+): Record<string, number> {
+  const map: Record<string, number> = {};
+  const usedCols = new Set<number>();
+  const scored: { field: string; col: number; score: number }[] = [];
+
+  for (let c = 0; c < headers.length; c++) {
+    const h = deaccent(headers[c]);
+    if (!h) continue;
+    for (const field of Object.keys(spec)) {
+      const { keys, exclude } = spec[field];
+      if (exclude?.some((k) => h.includes(deaccent(k)))) continue;
+      for (const k of keys) {
+        const nk = deaccent(k);
+        if (!nk) continue;
+        let score = 0;
+        if (h === nk) score = 3;
+        else if (h.startsWith(nk)) score = 2;
+        else if (h.includes(nk)) score = 1;
+        if (score > 0) scored.push({ field, col: c, score });
+      }
+    }
+  }
+
+  // Best scores first; ties resolved by declaration order of fields
+  scored.sort(
+    (a, b) => b.score - a.score || Object.keys(spec).indexOf(a.field) - Object.keys(spec).indexOf(b.field)
+  );
+  for (const s of scored) {
+    if (s.field in map || usedCols.has(s.col)) continue;
+    map[s.field] = s.col;
+    usedCols.add(s.col);
+  }
+  return map;
+}
+
+/** Parse "08:00", "8h", "8h30", "8", "8:30" → minutes since midnight (or null). */
+export function parseTimeToMinutes(s: string): number | null {
+  const t = String(s || "").trim().toLowerCase().replace(/\s/g, "");
+  if (!t) return null;
+  const m = t.match(/^(\d{1,2})[:h.]?(\d{2})?$/);
+  if (!m) return null;
+  const h = parseInt(m[1], 10);
+  const min = m[2] !== undefined ? parseInt(m[2], 10) : 0;
+  if (h < 0 || h > 23 || min > 59) return null;
+  return h * 60 + min;
+}
+
+const DAY_ALIASES: Record<string, number> = {
+  lundi: 1, lun: 1, monday: 1, mon: 1, "الاثنين": 1, "الأثنين": 1, "اثنين": 1,
+  mardi: 2, mar: 2, tuesday: 2, tue: 2, "الثلاثاء": 2, "ثلاثاء": 2,
+  mercredi: 3, mer: 3, wednesday: 3, wed: 3, "الأربعاء": 3, "الاربعاء": 3, "أربعاء": 3,
+  jeudi: 4, jeu: 4, thursday: 4, thu: 4, "الخميس": 4, "خميس": 4,
+  vendredi: 5, ven: 5, friday: 5, fri: 5, "الجمعة": 5, "الجمعه": 5, "جمعة": 5,
+  samedi: 6, sam: 6, saturday: 6, sat: 6, "السبت": 6, "سبت": 6,
+};
+
+/** Parse "Lundi", "lun", "Monday", "الاثنين", "1" → day of week 1..6 (or null). */
+export function parseDayOfWeek(s: string): number | null {
+  const t = deaccent(String(s || ""));
+  if (/^[1-6]$/.test(t)) return parseInt(t, 10);
+  return DAY_ALIASES[t] ?? null;
+}
+
+/** Read an uploaded file buffer as a 2D array (handles .xlsx/.xls/.csv, FR ";" or "," separators). */
+function readSheetRows(buffer: ArrayBuffer): any[][] {
+  const bytes = new Uint8Array(buffer);
+  // XLSX/XLS files start with the "PK" / OLE magic bytes → binary workbook
+  const isBinary =
+    (bytes.length >= 2 && bytes[0] === 0x50 && bytes[1] === 0x4b) ||
+    (bytes.length >= 4 && bytes[0] === 0xd0 && bytes[1] === 0xcf);
+
+  if (isBinary) {
+    const wb = XLSX.read(buffer, { type: "array" });
+    const sheetName = wb.SheetNames[0];
+    return sheetName
+      ? (XLSX.utils.sheet_to_json(wb.Sheets[sheetName], {
+          header: 1,
+          raw: false,
+          defval: "",
+          blankrows: false,
+        }) as any[][])
+      : [];
+  }
+
+  // CSV as text — handle BOM and French semicolon separators
+  let text = new TextDecoder("utf-8").decode(bytes);
+  if (text.charCodeAt(0) === 0xfeff) text = text.slice(1);
+  const firstLine = text.split(/\r?\n/)[0] || "";
+  if (firstLine.includes(";") && !firstLine.includes(",")) {
+    text = text.replace(/;/g, ",");
+  }
+  const wb = XLSX.read(text, { type: "string" });
+  const sheetName = wb.SheetNames[0];
+  return sheetName
+    ? (XLSX.utils.sheet_to_json(wb.Sheets[sheetName], {
+        header: 1,
+        raw: false,
+        defval: "",
+        blankrows: false,
+      }) as any[][])
+    : [];
+}
+
+// ============
+// Teachers import
+// ============
+
+export interface ParsedTeacherRow {
+  firstName: string;
+  lastName: string;
+  matiere: string;
+  email?: string;
+  password?: string;
+}
+
+/**
+ * Parse an Excel/CSV file containing the teachers list.
+ * Expected columns (any order, FR or AR):
+ *  - Nom / النسب          (required)
+ *  - Prénom / الاسم       (required)
+ *  - Matière / المادة     (required)
+ *  - Email / البريد       (optional — auto-generated if missing)
+ *  - Mot de passe / كلمة المرور (optional — default applied if missing)
+ */
+export function parseTeachersExcel(buffer: ArrayBuffer): {
+  rows: ParsedTeacherRow[];
+  detectedHeaders: string[];
+  totalRows: number;
+} {
+  const raw = readSheetRows(buffer);
+  if (raw.length === 0) return { rows: [], detectedHeaders: [], totalRows: 0 };
+
+  const spec: Record<string, ColSpec> = {
+    firstName: { keys: ["prénom", "prenom", "first name", "الاسم"] },
+    lastName: { keys: ["nom", "last name", "family name", "النسب", "لقب"], exclude: ["prénom", "prenom", "first"] },
+    matiere: { keys: ["matière", "matiere", "subject", "المادة", "تخصص"] },
+    email: { keys: ["email", "e-mail", "mail", "courriel", "البريد"] },
+    password: { keys: ["password", "mot de passe", "pass", "كلمة المرور"] },
+  };
+
+  let headerRowIdx = -1;
+  let colMap: Record<string, number> = {};
+  for (let i = 0; i < Math.min(raw.length, 20); i++) {
+    const headers = raw[i].map((h) => String(h || ""));
+    const map = detectColumns(headers, spec);
+    if (("lastName" in map || "firstName" in map) && "matiere" in map) {
+      headerRowIdx = i;
+      colMap = map;
+      break;
+    }
+  }
+
+  if (headerRowIdx === -1) {
+    // Fallback: fixed layout A=Nom, B=Prénom, C=Matière, D=Email, E=Mot de passe
+    colMap = { lastName: 0, firstName: 1, matiere: 2, email: 3, password: 4 };
+    headerRowIdx = -1;
+  }
+
+  const detectedHeaders =
+    headerRowIdx >= 0
+      ? raw[headerRowIdx].map((h) => String(h || ""))
+      : ["Nom", "Prénom", "Matière", "Email", "Mot de passe"];
+
+  const dataRows = headerRowIdx >= 0 ? raw.slice(headerRowIdx + 1) : raw;
+  const rows: ParsedTeacherRow[] = [];
+
+  for (const r of dataRows) {
+    const firstName = colMap.firstName !== undefined ? String(r[colMap.firstName] ?? "").trim() : "";
+    const lastName = colMap.lastName !== undefined ? String(r[colMap.lastName] ?? "").trim() : "";
+    const matiere = colMap.matiere !== undefined ? String(r[colMap.matiere] ?? "").trim() : "";
+    if (!firstName && !lastName && !matiere) continue; // fully empty row
+    const email = colMap.email !== undefined ? String(r[colMap.email] ?? "").trim() : "";
+    const password = colMap.password !== undefined ? String(r[colMap.password] ?? "").trim() : "";
+    rows.push({
+      firstName,
+      lastName,
+      matiere,
+      email: email || undefined,
+      password: password || undefined,
+    });
+  }
+
+  return { rows, detectedHeaders, totalRows: rows.length };
+}
+
+// ============
+// Service tables import (CSV / Excel)
+// ============
+
+export interface ParsedServiceRow {
+  day: number | null; // 1..6 resolved, null if invalid
+  dayRaw: string;
+  startMin: number | null;
+  endMin: number | null;
+  classeCode: string;
+  groupeCode: string; // "" = whole class
+  teacherName: string;
+  matiere: string;
+}
+
+/**
+ * Parse a CSV/Excel file containing the weekly service tables.
+ * Expected columns (any order, FR or AR):
+ *  - Jour / اليوم                     (Lundi..Samedi, abbreviations, EN, AR or 1-6)
+ *  - Heure début / Heure fin          ("08:00", "8h", "8"…) — or a combined "Créneau" column ("08:00-10:00")
+ *  - Classe / القسم                   (required)
+ *  - Groupe / المجموعة                (optional)
+ *  - Enseignant / الأستاذ             ("Nom Prénom")
+ *  - Matière / المادة
+ */
+export function parseServiceFile(buffer: ArrayBuffer): {
+  rows: ParsedServiceRow[];
+  detectedHeaders: string[];
+  totalRows: number;
+} {
+  const raw = readSheetRows(buffer);
+  if (raw.length === 0) return { rows: [], detectedHeaders: [], totalRows: 0 };
+
+  const spec: Record<string, ColSpec> = {
+    day: { keys: ["jour", "day", "اليوم"] },
+    startMin: { keys: ["heure début", "heure debut", "début", "debut", "start", "الوقت من", "بداية", "من الساعة"] },
+    endMin: { keys: ["heure fin", "fin", "end", "الوقت إلى", "نهاية", "إلى الساعة"] },
+    creneau: { keys: ["créneau", "creneau", "plage horaire", "plage", "slot", "فترة زمنية", "الفترة"] },
+    classe: { keys: ["classe", "class", "القسم", "section"] },
+    groupe: { keys: ["groupe", "group", "المجموعة"] },
+    teacher: { keys: ["enseignant", "professeur", "prof", "teacher", "الأستاذ", "الاستاذ"] },
+    matiere: { keys: ["matière", "matiere", "subject", "المادة"] },
+  };
+
+  let headerRowIdx = -1;
+  let colMap: Record<string, number> = {};
+  for (let i = 0; i < Math.min(raw.length, 20); i++) {
+    const headers = raw[i].map((h) => String(h || ""));
+    const map = detectColumns(headers, spec);
+    if ("day" in map && "classe" in map && "teacher" in map) {
+      headerRowIdx = i;
+      colMap = map;
+      break;
+    }
+  }
+
+  if (headerRowIdx === -1) {
+    // Fallback: fixed layout A=Jour, B=Heure début, C=Heure fin, D=Classe, E=Groupe, F=Enseignant, G=Matière
+    colMap = { day: 0, startMin: 1, endMin: 2, classe: 3, groupe: 4, teacher: 5, matiere: 6 };
+    headerRowIdx = -1;
+  }
+
+  const detectedHeaders =
+    headerRowIdx >= 0
+      ? raw[headerRowIdx].map((h) => String(h || ""))
+      : ["Jour", "Heure début", "Heure fin", "Classe", "Groupe", "Enseignant", "Matière"];
+
+  const dataRows = headerRowIdx >= 0 ? raw.slice(headerRowIdx + 1) : raw;
+  const rows: ParsedServiceRow[] = [];
+
+  for (const r of dataRows) {
+    const dayRaw = colMap.day !== undefined ? String(r[colMap.day] ?? "").trim() : "";
+    let startStr = colMap.startMin !== undefined ? String(r[colMap.startMin] ?? "").trim() : "";
+    let endStr = colMap.endMin !== undefined ? String(r[colMap.endMin] ?? "").trim() : "";
+    const creneauRaw = colMap.creneau !== undefined ? String(r[colMap.creneau] ?? "").trim() : "";
+    // Combined "Créneau" column: "08:00-10:00", "08:00 – 10:00", "08:00 à 10:00"
+    if ((!startStr || !endStr) && creneauRaw) {
+      const parts = creneauRaw.split(/\s*(?:[-–—>]|à|→)\s*/).filter(Boolean);
+      if (parts.length >= 2) {
+        if (!startStr) startStr = parts[0];
+        if (!endStr) endStr = parts[parts.length - 1];
+      }
+    }
+    const classeCode = colMap.classe !== undefined ? String(r[colMap.classe] ?? "").trim() : "";
+    const groupeCode = colMap.groupe !== undefined ? String(r[colMap.groupe] ?? "").trim() : "";
+    const teacherName = colMap.teacher !== undefined
+      ? String(r[colMap.teacher] ?? "").trim().replace(/,/g, " ").replace(/\s+/g, " ")
+      : "";
+    const matiere = colMap.matiere !== undefined ? String(r[colMap.matiere] ?? "").trim() : "";
+
+    if (!dayRaw && !startStr && !endStr && !classeCode && !teacherName && !matiere) continue;
+
+    const startMin = parseTimeToMinutes(startStr);
+    const endMin = parseTimeToMinutes(endStr);
+
+    rows.push({
+      day: parseDayOfWeek(dayRaw),
+      dayRaw,
+      startMin,
+      endMin,
+      classeCode,
+      groupeCode: groupeCode === "-" ? "" : groupeCode,
+      teacherName,
+      matiere,
+    });
+  }
+
+  return { rows, detectedHeaders, totalRows: rows.length };
+}
+
 /**
  * Parse an Excel/CSV file containing the Massar student list.
  * Expected columns (any order, headers can be in FR or AR):
@@ -24,19 +346,7 @@ export function parseStudentExcel(buffer: ArrayBuffer): {
   detectedHeaders: string[];
   totalRows: number;
 } {
-  const wb = XLSX.read(buffer, { type: "array" });
-  const sheetName = wb.SheetNames[0];
-  if (!sheetName) return { rows: [], detectedHeaders: [], totalRows: 0 };
-  const sheet = wb.Sheets[sheetName];
-
-  // Get the data as array of arrays (so we can scan for the header row)
-  const raw: any[][] = XLSX.utils.sheet_to_json(sheet, {
-    header: 1,
-    raw: true,
-    defval: "",
-    blankrows: false,
-  });
-
+  const raw = readSheetRows(buffer);
   if (raw.length === 0) return { rows: [], detectedHeaders: [], totalRows: 0 };
 
   // Header detection — find the row that contains a Massar-like column

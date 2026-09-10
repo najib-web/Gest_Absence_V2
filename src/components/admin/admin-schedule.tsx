@@ -3,9 +3,10 @@
 // Surveillant page: weekly service table (Lundi→Samedi, 8h→18h).
 // Add / remove sessions for each teacher directly on the grid.
 
-import { useMemo, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import { useI18n } from "@/lib/i18n-context";
 import { useFetch, apiPost, apiDelete } from "@/lib/hooks";
+import { SUBJECTS } from "@/lib/subjects";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -17,7 +18,16 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { Loader2, Plus, CalendarDays, FilterX } from "lucide-react";
+import { Badge } from "@/components/ui/badge";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table";
+import { Loader2, Plus, CalendarDays, FilterX, Upload, Download, FileSpreadsheet, CheckCircle2, XCircle } from "lucide-react";
 import { toast } from "sonner";
 import {
   Dialog,
@@ -37,21 +47,6 @@ import {
   type SlotWithPeople,
 } from "@/lib/schedule";
 
-const SUBJECTS = [
-  { fr: "Mathématiques", ar: "الرياضيات" },
-  { fr: "Physique-Chimie", ar: "الفيزياء والكيمياء" },
-  { fr: "SVT", ar: "علوم الحياة والأرض" },
-  { fr: "Français", ar: "الفرنسية" },
-  { fr: "Arabe", ar: "العربية" },
-  { fr: "Anglais", ar: "الإنجليزية" },
-  { fr: "Philosophie", ar: "الفلسفة" },
-  { fr: "Histoire-Géo", ar: "التاريخ والجغرافيا" },
-  { fr: "Informatique", ar: "المعلوميات" },
-  { fr: "EPS", ar: "التربية البدنية" },
-  { fr: "Mathématiques (TP)", ar: "الرياضيات (أعمال تطبيقية)" },
-  { fr: "Physique (TP)", ar: "الفيزياء (أعمال تطبيقية)" },
-];
-
 interface SlotApi {
   id: string;
   dayOfWeek: number;
@@ -64,6 +59,31 @@ interface SlotApi {
   groupe: { code: string } | null;
 }
 
+interface SlotPreviewRow {
+  index: number;
+  day: number | null;
+  dayLabel: string;
+  startMin: number | null;
+  endMin: number | null;
+  timeLabel: string;
+  classeCode: string;
+  classeLabel?: string;
+  groupeCode: string;
+  teacherName: string;
+  teacherResolved: string | null;
+  matiere: string;
+  matiereAr: string | null;
+  status: "create" | "update" | "error";
+  errorCode?: string;
+  summary?: never;
+}
+
+interface ImportSummary {
+  toCreate: number;
+  toUpdate: number;
+  errors: number;
+}
+
 export function AdminSchedule() {
   const { t } = useI18n();
   const { data: slotsData, loading, refresh } = useFetch<{ slots: SlotApi[] }>("/api/service-slots");
@@ -73,6 +93,13 @@ export function AdminSchedule() {
   const [dialogOpen, setDialogOpen] = useState(false);
   const [preset, setPreset] = useState<{ dow: number; startMin: number; endMin: number } | null>(null);
   const [filterTeacher, setFilterTeacher] = useState<string>("all");
+  const [importOpen, setImportOpen] = useState(false);
+  const [previewRows, setPreviewRows] = useState<SlotPreviewRow[]>([]);
+  const [importSummary, setImportSummary] = useState<ImportSummary | null>(null);
+  const [uploading, setUploading] = useState(false);
+  const [committing, setCommitting] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const lastFileRef = useRef<File | null>(null);
 
   const teachers = teachersData?.teachers ?? [];
   const classes = classesData?.classes ?? [];
@@ -89,6 +116,71 @@ export function AdminSchedule() {
   function openDialog(presetVal?: { dow: number; startMin: number; endMin: number }) {
     setPreset(presetVal ?? null);
     setDialogOpen(true);
+  }
+
+  async function handleFile(file: File) {
+    lastFileRef.current = file;
+    setUploading(true);
+    setPreviewRows([]);
+    setImportSummary(null);
+    try {
+      const fd = new FormData();
+      fd.append("file", file);
+      fd.append("mode", "preview");
+      const res = await fetch("/api/service-slots/import", { method: "POST", body: fd });
+      const data = await res.json();
+      if (!res.ok) {
+        toast.error(data.error || t.error);
+        return;
+      }
+      setPreviewRows(data.rows);
+      setImportSummary(data.summary ?? null);
+      setImportOpen(true);
+    } catch (e) {
+      toast.error((e as Error).message);
+    } finally {
+      setUploading(false);
+    }
+  }
+
+  async function commitImport() {
+    if (previewRows.length === 0) return;
+    setCommitting(true);
+    try {
+      const file = lastFileRef.current;
+      if (!file) {
+        toast.error(t.noFileSelected);
+        return;
+      }
+      const fd = new FormData();
+      fd.append("file", file);
+      fd.append("mode", "commit");
+      const res = await fetch("/api/service-slots/import", { method: "POST", body: fd });
+      const data = await res.json();
+      if (!res.ok) {
+        toast.error(data.error || t.error);
+        return;
+      }
+      toast.success(
+        `${data.created} ${t.slotsImported}` +
+        (data.updated ? `, ${data.updated} ${t.slotsUpdated}` : "") +
+        (data.skipped ? `, ${data.skipped} ${t.rowsSkipped.toLowerCase()}` : "")
+      );
+      setImportOpen(false);
+      setPreviewRows([]);
+      refresh();
+    } catch (e) {
+      toast.error((e as Error).message);
+    } finally {
+      setCommitting(false);
+    }
+  }
+
+  function downloadTemplate() {
+    const a = document.createElement("a");
+    a.href = "/templates/tableaux%20de%20services.csv";
+    a.download = "tableaux de services.csv";
+    a.click();
   }
 
   async function deleteSlot(slot: SlotWithPeople) {
@@ -131,6 +223,25 @@ export function AdminSchedule() {
               <FilterX className="h-4 w-4" />
             </Button>
           )}
+          <Button variant="outline" size="sm" onClick={downloadTemplate}>
+            <Download className="h-4 w-4 me-2" />
+            {t.templateServices}
+          </Button>
+          <Button variant="outline" size="sm" onClick={() => fileInputRef.current?.click()} disabled={uploading}>
+            {uploading ? <Loader2 className="h-4 w-4 me-2 animate-spin" /> : <Upload className="h-4 w-4 me-2" />}
+            {t.importServiceTable}
+          </Button>
+          <input
+            ref={fileInputRef}
+            type="file"
+            accept=".csv,.xlsx,.xls"
+            className="hidden"
+            onChange={(e) => {
+              const f = e.target.files?.[0];
+              if (f) handleFile(f);
+              e.target.value = "";
+            }}
+          />
           <Button size="sm" onClick={() => openDialog()} disabled={teachers.length === 0 || classes.length === 0}>
             <Plus className="h-4 w-4 me-2" />
             {t.addSlot}
@@ -159,6 +270,92 @@ export function AdminSchedule() {
         classes={classes}
         onSaved={() => refresh()}
       />
+
+      {/* Import Service Tables Preview Modal */}
+      <Dialog open={importOpen} onOpenChange={setImportOpen}>
+        <DialogContent className="max-w-4xl max-h-[85vh] overflow-hidden flex flex-col">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <FileSpreadsheet className="h-5 w-5 text-primary" />
+              {t.importServiceTable}
+            </DialogTitle>
+            <DialogDescription>
+              {previewRows.length} {t.rowsFound}
+              {importSummary && (
+                <span className="ms-2 inline-flex gap-2">
+                  <Badge className="bg-emerald-600 text-white">{importSummary.toCreate} {t.toCreate}</Badge>
+                  {importSummary.toUpdate > 0 && (
+                    <Badge variant="secondary">{importSummary.toUpdate} {t.toUpdate}</Badge>
+                  )}
+                  {importSummary.errors > 0 && (
+                    <Badge variant="destructive">{importSummary.errors} {t.error}</Badge>
+                  )}
+                </span>
+              )}
+            </DialogDescription>
+          </DialogHeader>
+          <div className="flex-1 overflow-y-auto -mx-6 px-6">
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead className="w-12">{t.status}</TableHead>
+                  <TableHead>{t.selectDay}</TableHead>
+                  <TableHead>{t.timeSlot}</TableHead>
+                  <TableHead>{t.classe}</TableHead>
+                  <TableHead>{t.groupe}</TableHead>
+                  <TableHead>{t.teacher}</TableHead>
+                  <TableHead>{t.subject}</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {previewRows.map((r) => (
+                  <TableRow key={r.index}>
+                    <TableCell>
+                      {r.status !== "error" ? (
+                        <CheckCircle2 className="h-4 w-4 text-emerald-500" />
+                      ) : (
+                        <XCircle className="h-4 w-4 text-destructive" />
+                      )}
+                    </TableCell>
+                    <TableCell>{r.dayLabel}</TableCell>
+                    <TableCell className="font-mono text-xs">{r.timeLabel}</TableCell>
+                    <TableCell>
+                      <Badge variant="outline">{r.classeLabel || r.classeCode || "—"}</Badge>
+                    </TableCell>
+                    <TableCell>{r.groupeCode ? <Badge variant="secondary">{r.groupeCode}</Badge> : <span className="text-xs text-muted-foreground">{t.noGroup}</span>}</TableCell>
+                    <TableCell>
+                      {r.teacherResolved ? (
+                        <span className="text-sm">{r.teacherResolved}</span>
+                      ) : (
+                        <span className="text-xs text-destructive">{t.errTeacherNotFound}</span>
+                      )}
+                    </TableCell>
+                    <TableCell>
+                      {r.matiere ? (
+                        <Badge variant="secondary">{r.matiere}</Badge>
+                      ) : (
+                        <span className="text-xs text-muted-foreground">—</span>
+                      )}
+                    </TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setImportOpen(false)}>
+              {t.cancel}
+            </Button>
+            <Button
+              onClick={commitImport}
+              disabled={committing || previewRows.length === 0 || (importSummary?.toCreate ?? 0) + (importSummary?.toUpdate ?? 0) === 0}
+            >
+              {committing ? <Loader2 className="h-4 w-4 me-2 animate-spin" /> : <Upload className="h-4 w-4 me-2" />}
+              {t.confirmImport} ({(importSummary?.toCreate ?? 0) + (importSummary?.toUpdate ?? 0)})
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

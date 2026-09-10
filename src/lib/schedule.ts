@@ -146,6 +146,8 @@ export function findNextSlot<T extends SlotLike>(
 }
 
 export interface SlotWithPeople extends SlotLike {
+  id: string;
+  teacherId?: string;
   teacher?: { firstName: string; lastName: string } | null;
   classe?: { code: string } | null;
   groupe?: { code: string } | null;

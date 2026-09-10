@@ -44,7 +44,7 @@ export function I18nProvider({ children }: { children: ReactNode }) {
   const value: I18nContextValue = {
     locale,
     setLocale,
-    t: translations[locale],
+    t: translations[locale] as Dict,
     dir: getDirection(locale),
   };
 
